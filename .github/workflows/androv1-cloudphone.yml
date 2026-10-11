@@ -1,138 +1,159 @@
-name: AndroV1 Android 16 CloudPhone (Windows - High Performance)
+name: AndroV1 Scrcpy CloudPhone (Zero VNC - Fullscreen Touch)
 
-on:
+on: 
   push:
     branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   cloudphone:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 360
-
+    
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
-
-    - name: Setup Android SDK & Environment
+      
+    - name: Free Disk Space & Setup Hardware KVM
       run: |
-        Write-Host "==========================================================" -ForegroundColor Cyan
-        Write-Host "   ANDRO V1 // ANDROID 16 GOOGLE CLOUDPHONE (WINDOWS)     " -ForegroundColor Cyan
-        Write-Host "==========================================================" -ForegroundColor Cyan
-        Write-Host "[INFO] Allocating System Resources..." -ForegroundColor Green
-        Write-Host "RAM Allocated : 12GB (12288 MB)" -ForegroundColor Yellow
-        Write-Host "Storage Disk  : 128GB" -ForegroundColor Yellow
-        Write-Host "Target FPS    : 120 FPS (Low-Latency Stream)" -ForegroundColor Yellow
-        Write-Host "Audio Stream  : ENABLED" -ForegroundColor Yellow
-        Write-Host "Touch-Lock    : ZERO-LAG MOBILE BROWSER LOCK" -ForegroundColor Yellow
-
-    - name: Install Android 16 Google System Image & Emulator
-      run: |
-        $env:ANDROID_HOME = "C:\Android\android-sdk"
-        if (-not (Test-Path $env:ANDROID_HOME)) {
-            $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
-        }
-        echo "y" | & "C:\Program Files (x86)\Android\android-sdk\cmdline-tools\latest\bin\sdkmanager.bat" --licenses 2>$null || true
-        & "C:\Program Files (x86)\Android\android-sdk\cmdline-tools\latest\bin\sdkmanager.bat" --install "platform-tools" "platforms;android-35" "emulator" "system-images;android-Baklava;google_apis;x86_64" 2>$null || & "C:\Program Files (x86)\Android\android-sdk\cmdline-tools\latest\bin\sdkmanager.bat" --install "system-images;android-35;google_apis;x86_64"
-
-    - name: Create Android 16 AVD with Max Specs
-      run: |
-        echo "no" | & "C:\Program Files (x86)\Android\android-sdk\cmdline-tools\latest\bin\avdmanager.bat" create avd -n "AndroV1_Phone" -k "system-images;android-Baklava;google_apis;x86_64" --device "pixel_8_pro" --force 2>$null || echo "no" | & "C:\Program Files (x86)\Android\android-sdk\cmdline-tools\latest\bin\avdmanager.bat" create avd -n "AndroV1_Phone" -k "system-images;android-35;google_apis;x86_64" --device "pixel_8_pro" --force
+        echo "========================================================"
+        echo "   ANDRO V1 // FREE DISK SPACE & VERIFY HARDWARE KVM   "
+        echo "========================================================"
+        # Free up 25+ GB runner disk space
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+        df -h
         
-        $configPath = "$env:USERPROFILE\.android\avd\AndroV1_Phone.avd\config.ini"
-        if (Test-Path $configPath) {
-            Add-Content $configPath "hw.ramSize = 12288"
-            Add-Content $configPath "vm.heapSize = 1024"
-            Add-Content $configPath "disk.dataPartition.size = 128G"
-            Add-Content $configPath "hw.gpu.enabled = yes"
-            Add-Content $configPath "hw.gpu.mode = auto"
-            Add-Content $configPath "hw.audioInput = yes"
-            Add-Content $configPath "hw.audioOutput = yes"
-            Add-Content $configPath "hw.keyboard = yes"
-            Add-Content $configPath "hw.mainKeys = no"
-        }
-
-    - name: Launch Android 16 Emulator in Background
-      run: |
-        Write-Host "[INFO] Booting Android 16 Google CloudPhone..." -ForegroundColor Green
-        Start-Process -FilePath "C:\Program Files (x86)\Android\android-sdk\emulator\emulator.exe" -ArgumentList "-avd AndroV1_Phone -no-window -no-snapshot -gpu swiftshader_indirect -memory 12288 -partition-size 65536 -camera-back none -camera-front none" -WindowStyle Hidden
+        # Verify KVM hardware acceleration
+        if [ -e /dev/kvm ]; then
+          echo "[SUCCESS] /dev/kvm hardware virtualization is present!"
+          sudo chmod 777 /dev/kvm
+        else
+          echo "[WARNING] /dev/kvm not found, checking fallback."
+        fi
         
-        Write-Host "[INFO] Waiting for Android 16 CloudPhone to fully boot..." -ForegroundColor Yellow
-        $booted = $false
-        for ($i=1; $i -le 60; $i++) {
-            $status = & "C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe" shell getprop sys.boot_completed 2>$null
-            if ($status -eq "1") {
-                Write-Host "[SUCCESS] Android 16 System Boot Completed!" -ForegroundColor Green
-                $booted = $true
-                break
-            }
-            Start-Sleep -Seconds 3
-        }
-
-    - name: Deploy High-FPS WebRTC & Touch-Lock Web Gateway
-      run: |
-        # Download and setup ws-scrcpy web viewer with touch-lock mobile controls
-        Invoke-WebRequest -Uri "https://github.com/Genymobile/scrcpy/releases/download/v2.4/scrcpy-win64-v2.4.zip" -OutFile "scrcpy.zip"
-        Expand-Archive -Path "scrcpy.zip" -DestinationPath "scrcpy"
+        sudo apt-get update -y
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl jq ffmpeg adb scrcpy nodejs npm
         
-        # Setup Lightweight Node.js WebRTC / WS Scrcpy gateway with touch-lock UI
-        mkdir web-client
-        @"
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-          <title>AndroV1 // Android 16 CloudPhone</title>
-          <style>
-            * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-            html, body { width:100%; height:100%; background:#050508; overflow:hidden; touch-action:none !important; overscroll-behavior:none !important; }
-            #cloudphone-container { width:100vw; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; }
-            #phone-screen { width:100%; max-width:480px; height:100%; max-height:920px; background:#000; position:relative; overflow:hidden; touch-action:none !important; user-select:none; }
-            #canvas-stream { width:100%; height:100%; object-fit:contain; touch-action:none; }
-            .nav-bar { position:absolute; bottom:0; left:0; width:100%; height:48px; background:rgba(0,0,0,0.85); display:flex; justify-content:space-around; align-items:center; z-index:100; }
-            .nav-btn { color:#3ddc84; font-size:18px; padding:10px 20px; cursor:pointer; }
-            .fps-counter { position:absolute; top:8px; right:8px; background:rgba(0,0,0,0.7); color:#3ddc84; font-family:monospace; font-size:11px; padding:3px 8px; border-radius:10px; border:1px solid #3ddc84; }
-          </style>
-        </head>
-        <body>
-          <div id="cloudphone-container">
-            <div id="phone-screen">
-              <div class="fps-counter" id="fps">120 FPS | ANDROID 16</div>
-              <canvas id="canvas-stream"></canvas>
-              <div class="nav-bar">
-                <div class="nav-btn" onclick="sendKey(4)">◀</div>
-                <div class="nav-btn" onclick="sendKey(3)">●</div>
-                <div class="nav-btn" onclick="sendKey(187)">■</div>
-              </div>
-            </div>
-          </div>
-          <script>
-            // Strict touch lock - stops mobile browser from scrolling or dragging
-            document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
-            function sendKey(code) { fetch('/api/key?code=' + code); }
-          </script>
-        </body>
-        </html>
-        "@ | Set-Content -Path "web-client\index.html" -Encoding UTF8
+        sudo curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+        sudo chmod +x /usr/local/bin/cloudflared
 
-    - name: Start Tunnel Gateway (Cloudflare)
+    - name: Launch Real Google Android Phone (Clean Raw Screen - No Skin)
       run: |
+        echo "========================================================"
+        echo "   STARTING CLEAN ANDROID PHONE (NO SKIN - RAW DISPLAY) "
+        echo "========================================================"
+        echo "Selected Android Engine Image: budtmo/docker-android:emulator_14.0"
         
-        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
-        Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url http://127.0.0.1:8080" -RedirectStandardError "cf_tunnel.log" -WindowStyle Hidden
-        Start-Sleep -Seconds 6
-        $cfUrl = (Select-String -Path "cf_tunnel.log" -Pattern "https://[a-zA-Z0-9-]+\.trycloudflare\.com").Matches.Value
-        Write-Host "==========================================================" -ForegroundColor Green
-        Write-Host "ANDRO V1 // CLOUDPHONE IS LIVE (CLOUDFLARE):" -ForegroundColor Green
-        Write-Host "URL : $cfUrl" -ForegroundColor Cyan
-        Write-Host "==========================================================" -ForegroundColor Green
-        echo "CLOUDFLARE_URL=$cfUrl" >> $env:GITHUB_ENV
-        
+        # Launch Android emulator with EMULATOR_NO_SKIN=true and WEB_VNC=false
+        # This completely removes the fake phone skin, dial pad, and VNC mouse layer!
+        sudo docker run -d --name androv1-phone \
+          --privileged \
+          --device /dev/kvm \
+          -p 5555:5555 \
+          -e EMULATOR_NO_SKIN=true \
+          -e WEB_VNC=false \
+          -e AUDIO=true \
+          budtmo/docker-android:emulator_14.0
 
-    - name: Keep-Alive Session Monitor
+        echo "[INFO] Waiting for Android ADB connection on 127.0.0.1:5555..."
+        BOOTED=0
+        for i in $(seq 1 60); do
+          if adb connect 127.0.0.1:5555 2>/dev/null | grep -q "connected"; then
+            echo "[SUCCESS] Connected to Android ADB on 127.0.0.1:5555!"
+            BOOTED=1
+            break
+          fi
+          echo "Waiting for ADB port 5555... ($i/60)"
+          sleep 3
+        done
+
+        echo "[INFO] Waiting for Android OS boot to complete..."
+        adb -s 127.0.0.1:5555 wait-for-device
+        for i in $(seq 1 60); do
+          BOOT_STATUS=$(adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+          if [ "$BOOT_STATUS" = "1" ]; then
+            echo "[SUCCESS] Android OS has fully booted to Home Screen!"
+            break
+          fi
+          echo "Booting Android system... ($i/60)"
+          sleep 4
+        done
+
+    - name: Launch ws-scrcpy Web Streaming Engine (Zero VNC - WebCodecs 60 FPS)
       run: |
-        Write-Host "[INFO] Android 16 CloudPhone is fully operational for 6 hours max." -ForegroundColor Green
-        for ($i=360; $i -gt 0; $i--) {
-            Start-Sleep -Seconds 60
-        }
+        echo "========================================================"
+        echo "   STARTING SCRCPY WEB STREAMER (ZERO VNC - 60 FPS)     "
+        echo "========================================================"
+        # Pull and launch ws-scrcpy-web on host network
+        # Native WebCodecs H.264 stream, direct multi-touch digitizer, clipboard sync!
+        sudo docker run -d --name ws-scrcpy \
+          --net=host \
+          -e WS_SCRCPY_NO_BROWSER=1 \
+          bilbospocketses/ws-scrcpy-web:latest
+
+        echo "[INFO] Waiting for ws-scrcpy streamer on port 8000..."
+        for i in $(seq 1 45); do
+          if curl -s -I http://127.0.0.1:8000 > /dev/null 2>&1; then
+            echo "[SUCCESS] Scrcpy Web Streamer is LIVE on port 8000!"
+            break
+          fi
+          echo "Waiting for port 8000... ($i/45)"
+          sleep 2
+        done
+
+    - name: Establish Live Public Tunnel & Display Fullscreen Phone Link
+      run: |
+        echo "Starting Cloudflare tunnel on port 8000 (Scrcpy Web)..."
+        if ! command -v cloudflared >/dev/null 2>&1; then
+          sudo curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+          sudo chmod +x /usr/local/bin/cloudflared
+        fi
+        nohup cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8000 > /tmp/tunnel.log 2>&1 &
+        TUNNEL_URL=""
+        for i in $(seq 1 50); do
+          sleep 2
+          TUNNEL_URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/tunnel.log | head -1 || true)
+          if [ -n "$TUNNEL_URL" ]; then
+            break
+          fi
+        done
+        
+        if [ -z "$TUNNEL_URL" ]; then
+          echo "[ERROR] Tunnel could not be established. Log:"
+          cat /tmp/tunnel.log
+          exit 1
+        fi
+        
+        PHONE_URL="$TUNNEL_URL"
+        echo "PHONE_URL=$PHONE_URL" >> $GITHUB_ENV
+        echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_ENV
+        
+        echo "### 📱 REAL ANDROID CLOUDPHONE (ZERO VNC - FULLSCREEN TOUCH) IS LIVE!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 👉 [CLICK HERE TO OPEN YOUR ANDROID PHONE]($PHONE_URL)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+        echo "| 📱 Direct Phone Web URL | **$PHONE_URL** |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🚀 Streaming Engine | ws-scrcpy WebCodecs (Zero VNC / 60 FPS) |" >> $GITHUB_STEP_SUMMARY
+        echo "| 📐 Screen Mode | 100% Fullscreen Fit (No Bezels, No Black Bars) |" >> $GITHUB_STEP_SUMMARY
+        echo "| 👆 Touch Protocol | Real Multi-Touch (Natural Swipe, Scroll & Tap) |" >> $GITHUB_STEP_SUMMARY
+        echo "| 📋 Clipboard Sync | Real-Time 2-Way Sync Enabled |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "> **Direct Mobile Instructions:** Open the link above in Android Chrome, Safari, or Brave. It will immediately show your Android phone screen fitting 100% of your mobile display with smooth 60 FPS touch control." >> $GITHUB_STEP_SUMMARY
+        
+        echo "::notice title=Open Android Phone::$PHONE_URL"
+        echo "=========================================================="
+        echo "       ANDRO V1 // SCRCPY FULLSCREEN CLOUDPHONE READY!   "
+        echo "=========================================================="
+        echo "DIRECT PHONE URL (CLICK OR OPEN IN MOBILE BROWSER):"
+        echo "==> $PHONE_URL <=="
+        echo "=========================================================="
+
+    - name: Keep Alive Monitor
+      run: |
+        echo "Android CloudPhone session active for 6 hours max..."
+        echo "Direct Phone URL: ${{ env.PHONE_URL }}"
+        for i in {358..1}; do
+            sleep 60
+        done
